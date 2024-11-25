@@ -1,10 +1,11 @@
 import Home from './routes/Home.svelte';
-import Lorem from './routes/Lorem.svelte';
+import Login from './routes/Login.svelte';
 import NotFound from './routes/NotFound.svelte';
 
 export default {
     '/': Home,
-    '/lorem/:repeat': Lorem,
+    
+    '/login': Login,
     // The catch-all route must always be last
     '*': NotFound
 };

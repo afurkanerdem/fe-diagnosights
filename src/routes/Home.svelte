@@ -5,7 +5,7 @@
     Visit the <a href="https://github.com/ItalyPaleAle/svelte-spa-router">documentation for the router</a> to learn more.
 </p>
 <p>
-    Check a route: <a href="#/lorem/2">Lorem ipsum</a>
+    Check a route: <a href="#/login">Login</a>
 </p>
 
 <style>
