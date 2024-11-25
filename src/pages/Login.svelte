@@ -1,26 +1,49 @@
+<script lang="ts">
+  
+  import { loggedInUser } from '../stores/loggedInUser';
+  import {push, pop, replace} from 'svelte-spa-router'
 
-<script>
-  let email = '';
+  let username = '';
   let password = '';
   let backend_url = import.meta.env.VITE_BACKEND_URL
-  async function handleSubmit(e) {
-    e.preventDefault();
+  console.log('backend_url')
+  console.log(backend_url)
+  let errorMessage = '';
+
+  async function handleSubmit(e: SubmitEvent) { 
+    console.log('handleSubmit')
     try {
-      const response = await fetch(`${backend_url}/login`, {
+      errorMessage = ''; // Clear previous errors
+      
+      // Create URL-encoded string
+      const urlEncodedData = new URLSearchParams();
+      urlEncodedData.append('username', username);
+      urlEncodedData.append('password', password);
+
+      const response = await fetch(`/api/login`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: JSON.stringify({ email, password }),
+        body: urlEncodedData.toString(),
       });
       
-      if (!response.ok) throw new Error('Login failed');
+      if (!response.ok) {
+        console.log('response not ok')
+        console.log(response) 
+        errorMessage = 'Invalid username or password';
+        return;
+      }
       
-      // Handle successful login here
       const data = await response.json();
+      loggedInUser.update(user => ({ ...user, username: data.username }));
+      replace('/')
+
       
     } catch (error) {
-      // Handle error here
+      console.log('error')
+      console.log(error)
+      errorMessage = 'Invalid username or password';
       console.error('Login error:', error);
     }
   }
@@ -32,14 +55,14 @@
     </div>
 
     <div class="flex items-center md:p-8 p-6 bg-white md:rounded-tl-[55px] md:rounded-bl-[55px] h-full">
-      <form class="max-w-lg w-full mx-auto">
+      <form class="max-w-lg w-full mx-auto" on:submit|preventDefault={handleSubmit}>
         <div class="mb-12">
           <h3 class="text-[#122023] text-4xl urbanist ">Sign in</h3>
         </div>
 
         <div>
           <div class="relative flex items-center">
-            <input name="email" type="text" required class="w-full text-sm border-b border-gray-300 focus:border-gray-800 px-2 py-3 outline-none" placeholder="Enter email" />
+            <input name="username" bind:value={username} type="text" required class="w-full text-sm border-b border-gray-300 focus:border-gray-800 px-2 py-3 outline-none" placeholder="Enter username" />
             <svg xmlns="http://www.w3.org/2000/svg" fill="#bbb" stroke="#bbb" class="w-[18px] h-[18px] absolute right-2" viewBox="0 0 682.667 682.667">
               <defs>
                 <clipPath id="a" clipPathUnits="userSpaceOnUse">
@@ -56,7 +79,7 @@
 
         <div class="mt-8">
           <div class="relative flex items-center">
-            <input name="password" type="password" required class="w-full text-sm border-b border-gray-300 focus:border-gray-800 px-2 py-3 outline-none" placeholder="Enter password" />
+            <input name="password" bind:value={password} type="password" required class="w-full text-sm border-b border-gray-300 focus:border-gray-800 px-2 py-3 outline-none" placeholder="Enter password" />
             <svg xmlns="http://www.w3.org/2000/svg" fill="#bbb" stroke="#bbb" class="w-[18px] h-[18px] absolute right-2 cursor-pointer" viewBox="0 0 128 128">
               <path d="M64 104C22.127 104 1.367 67.496.504 65.943a4 4 0 0 1 0-3.887C1.367 60.504 22.127 24 64 24s62.633 36.504 63.496 38.057a4 4 0 0 1 0 3.887C126.633 67.496 105.873 104 64 104zM8.707 63.994C13.465 71.205 32.146 96 64 96c31.955 0 50.553-24.775 55.293-31.994C114.535 56.795 95.854 32 64 32 32.045 32 13.447 56.775 8.707 63.994zM64 88c-13.234 0-24-10.766-24-24s10.766-24 24-24 24 10.766 24 24-10.766 24-24 24zm0-40c-8.822 0-16 7.178-16 16s7.178 16 16 16 16-7.178 16-16-7.178-16-16-16z" data-original="#000000"></path>
             </svg>
@@ -74,13 +97,22 @@
         </div>
 
         <div class="mt-12">
-          <button type="button" class="w-full py-3 px-6 text-sm urbanist tracking-wider rounded-full text-white bg-[#122023] hover:bg-green focus:outline-none">
+          <button type="submit" class="w-full py-3 px-6 text-sm urbanist tracking-wider rounded-full text-white bg-[#122023] hover:bg-green focus:outline-none">
             Sign in
           </button>
         </div>
 
-       
+        {#if errorMessage}
+          <p class="error">{errorMessage}</p>
+        {/if}
       </form>
     </div>
   </div>
 </div>
+
+<style>
+  .error {
+    color: red;
+    margin-top: 0.5rem;
+  }
+</style>

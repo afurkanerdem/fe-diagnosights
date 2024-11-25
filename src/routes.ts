@@ -1,6 +1,6 @@
-import Home from './routes/Home.svelte';
-import Login from './routes/Login.svelte';
-import NotFound from './routes/NotFound.svelte';
+import Home from './pages/Home.svelte';
+import Login from './pages/Login.svelte';
+import NotFound from './pages/NotFound.svelte';
 
 export default {
     '/': Home,
