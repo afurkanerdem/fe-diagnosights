@@ -37,7 +37,6 @@
   
       
         if (!response.ok) {
-          alert(`Upload failed: ${response.statusText}`);
           message = 'Wrong formatted file!';
           showFail = true;  // Notify user of the error
           showSuccess = false
@@ -54,8 +53,7 @@
       }
     }
   </script>
-<!-- Toast Notifications Container -->
-<div class="fixed top-4 right-4 z-50">
+<div class="fixed top-4 z-50">
     {#if showSuccess}
         <Success message={message} />
     {:else if showFail}

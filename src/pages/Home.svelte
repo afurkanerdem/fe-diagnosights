@@ -3,8 +3,8 @@
     import { loggedInUser } from "../stores/loggedInUser";
     import { push, location, replace } from "svelte-spa-router";
     import Sidebar from "../components/layout/Sidebar.svelte";
-    import PatientTable from "../components/layout/PatientTable.svelte";
-    import PatientRecordUpload from "../components/layout/PatientRecordUpload.svelte";
+    import PatientTable from "../components/sections/PatientTable.svelte";
+    import PatientRecordUpload from "../components/sections/PatientRecordUpload.svelte";
 
     let backend_url = import.meta.env.VITE_BACKEND_URL;
     let currentView = "patient-data";
