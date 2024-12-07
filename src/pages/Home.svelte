@@ -42,7 +42,7 @@
     onMount(checkAuth);
 </script>
 
-<div class="relative bg-[#f7f6f9] h-full min-h-screen font-[sans-serif]">
+<div class="relative  h-full min-h-screen font-[sans-serif]">
     <div class="flex items-start">
         <Sidebar />
         <button

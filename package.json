@@ -10,14 +10,17 @@
     "check": "svelte-check --tsconfig ./tsconfig.json"
   },
   "devDependencies": {
+    "@internationalized/date": "^3.6.0",
     "@sveltejs/vite-plugin-svelte": "^3.0.0",
     "@tsconfig/svelte": "^5.0.4",
     "@types/node": "^22.10.1",
     "autoprefixer": "^10.4.20",
+    "bits-ui": "^0.21.16",
     "clsx": "^2.1.1",
     "postcss": "^8.4.49",
     "svelte": "^4.2.3",
     "svelte-check": "^3.6.0",
+    "svelte-radix": "^1.1.1",
     "tailwind-merge": "^2.5.5",
     "tailwind-variants": "^0.3.0",
     "tailwindcss": "^3.4.15",
@@ -26,6 +29,8 @@
     "vite": "^5.0.0"
   },
   "dependencies": {
+    "date-fns": "^4.1.0",
+    "lucide-svelte": "^0.468.0",
     "svelte-headless-table": "^0.18.3",
     "svelte-spa-router": "^4.0.0"
   }

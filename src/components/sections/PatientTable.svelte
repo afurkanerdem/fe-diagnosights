@@ -1,29 +1,172 @@
 <script lang="ts">
-import type { LabRecord } from '../../types/labRecords';
-import type {MatchInfo} from '../../types/matchInfo';
-import type { ApiResponse, LabRecordMatchInfoPair  } from '../../types/apiResponse';
-import { readable, writable } from "svelte/store";
-import { createTable, Render, Subscribe } from "svelte-headless-table";
-import * as Table from "$lib/components/ui/table";
-import { onMount } from 'svelte'; // Import onMount to fetch data when the component mounts
+  import type { LabRecord } from "../../types/labRecords";
+  import type { MatchInfo } from "../../types/matchInfo";
+  import type { DateRange } from "bits-ui";
 
+  import Loading from "../misc/loading.svelte";
+  import type {
+    ApiResponse,
+    LabRecordMatchInfoPair,
+  } from "../../types/apiResponse";
 
-  // Extract lab records from the response and populate the data array
- let dataStore = writable<LabRecord[]>([]);
+  import { readable, writable } from "svelte/store";
+  import {
+    createTable,
+    DataBodyRow,
+    Render,
+    Subscribe,
+  } from "svelte-headless-table";
+  import { addPagination, addSortBy, addSubRows, addExpandedRows} from "svelte-headless-table/plugins";
+  import * as Table from "$lib/components/ui/table";
+  import { onMount } from "svelte"; // Import onMount to fetch data when the component mounts
+  import { Button } from "$lib/components/ui/button";
+  import Datepicker from "../../components/input/datepicker.svelte";
+  import { ArrowUpDown } from "lucide-svelte";
+  import {
+    CalendarDate,
+    getLocalTimeZone,
+    today,
+    type DateValue,
+  } from "@internationalized/date";
+  import Fail from "../popups/fail.svelte";
+  import { format } from "date-fns";
+  import { Input } from "$lib/components/ui/input";
+
+  let dataStore = writable<LabRecord[]>([]);
   let isLoading = true; // Add a loading state
+  let dateRange: DateRange | undefined;
+  let dateSearchButtonEnabled = false;
+  let showError = false;
+  let errorMessage = "";
+  let patientSearch = ""; // Add this new variable for patient search
+  let recordToMatchInfoMap: Map<String, Array<String> | undefined> = new Map();
+  let barcodeToRecordMap: Map<String, LabRecord> = new Map();
+  let showingMatchedRecords = false;
+  let selectedRecordMatches: LabRecord[] = [];
+  let selectedRecord: String | null = null;
+  let totalRecords = writable(0);
+  let recordsPerPage = 15;
 
- onMount(async () => {
-   const response = await fetch('/api/records');
-   const apiResponse: ApiResponse = await response.json();
-   dataStore.set(apiResponse.map(pair => pair.record));
-   isLoading = false; // Set loading to false after data is fetched
+   async function fetchMatchedRecords(barcodeId: String){
+    let matches = recordToMatchInfoMap.get(barcodeId);
+    let url = "/api/batchRecords"
+    if (matches) {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify( matches )
+      });
+      if (!response.ok) {
+        if (response.status === 401) {
+          window.location.reload();
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const records: Array<LabRecord> = await response.json();
+      return records;
+    }
+    return [];
+  }
+  // Modify the data fetching function
+  async function fetchRecords(
+    start?: DateValue | undefined,
+    end?: DateValue | undefined,
+  ) {
+    isLoading = true;
+    showError = false; // Reset error state
+    let url = `/api/records?limit=${recordsPerPage}&offset=${$pageIndex * recordsPerPage}`;
 
- });
+    if (start && end) {
+      url += `&timeIntervalStart=${start.toString()}&timeIntervalEnd=${end.toString()}`;
+    }
 
- const table = createTable(dataStore);
- 
- const columns = table.createColumns([
-  table.column({
+    // Add patient name search parameter
+    if (patientSearch.trim()) {
+      url += `&patientNameSurname=${encodeURIComponent(patientSearch.trim())}`;
+    }
+
+    console.log(url);
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        if (response.status === 401) {
+          window.location.reload();
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const apiResponse: ApiResponse = await response.json();
+      
+      // Assuming the API now returns total count in the response header
+      totalRecords.set(apiResponse.totalCount);
+      
+      recordToMatchInfoMap = new Map(
+        apiResponse.records.map((pair) => [
+          pair.record.barcodeId,
+          pair.matchInfo?.matchRecords,
+        ]),
+      );
+      barcodeToRecordMap = new Map(
+        apiResponse.records.map((pair) => [
+          pair.record.barcodeId,
+          pair.record,
+        ]),
+      );
+      dataStore.set(apiResponse.records.map((pair) => pair.record));
+    } catch (error) {
+      console.error(error);
+      errorMessage =
+        error instanceof Error
+          ? error.message
+          : "An error occurred while fetching records";
+      showError = true;
+    }
+    isLoading = false;
+  }
+
+  // Update onMount to use the new fetch function
+  onMount(() => {
+    fetchRecords();
+  });
+
+  // Handle search button click
+  function handleDateSearch() {
+    if (dateRange && dateRange.start && dateRange.end) {
+      fetchRecords(dateRange.start, dateRange.end);
+    }
+  }
+
+  // Add function to handle patient search
+  function handlePatientSearch() {
+    fetchRecords(dateRange?.start, dateRange?.end);
+  }
+
+  function formatDate(date: Date) {
+    try {
+      return format(date, "dd MMM yyyy HH:mm");
+    } catch {
+      return date.toISOString();
+    }
+  }
+
+  // Add a function to check if a record has matches
+  function hasMatches(barcodeId: string): boolean {
+    const matches = recordToMatchInfoMap.get(barcodeId);
+    return matches !== undefined && matches.length > 0;
+  }
+
+  const table = createTable(dataStore, {
+    page: addPagination({
+      initialPageSize: recordsPerPage,
+      serverSide: true,
+      serverItemCount: totalRecords ,
+    }),
+    sort: addSortBy(),
+  });
+
+  const columns = table.createColumns([
+    table.column({
       accessor: "barcodeId",
       header: "Barcode Id",
     }),
@@ -42,14 +185,17 @@ import { onMount } from 'svelte'; // Import onMount to fetch data when the compo
     table.column({
       accessor: "uploadDate",
       header: "Upload Date",
+      cell: ({ value }) => formatDate(value),
     }),
     table.column({
       accessor: "requestDate",
       header: "Request Date",
+      cell: ({ value }) => formatDate(value),
     }),
     table.column({
       accessor: "barcodeDate",
       header: "Barcode Date",
+      cell: ({ value }) => formatDate(value),
     }),
     table.column({
       accessor: (obj) => obj.resistantAntibiotics.join(", "),
@@ -62,91 +208,229 @@ import { onMount } from 'svelte'; // Import onMount to fetch data when the compo
     table.column({
       accessor: (obj) => obj.susceptibleAtHighDoseAntibiotics.join(", "),
       header: "Susceptible at High Dose Antibiotics",
-    }),
-    table.column({
-      accessor: (obj) => obj.barcodeId,
-      header: "",
-    }),
+    })
   ]);
 
+  const { headerRows, pageRows, tableAttrs, tableBodyAttrs, pluginStates } =
+    table.createViewModel(columns, {
+      rowDataId: (row) => row.barcodeId,
+    });
 
-  const { headerRows, pageRows, tableAttrs, tableBodyAttrs } =
-    table.createViewModel(columns);
+  const { hasNextPage, hasPreviousPage, pageIndex } = pluginStates.page;
 
+  // Add this new function to handle row clicks
+  async function handleRowClick(barcodeId: string) {
+    if (hasMatches(barcodeId)) {
+      isLoading = true;
+      try {
+        selectedRecord = barcodeId;
+        selectedRecordMatches = await fetchMatchedRecords(barcodeId);
+        showingMatchedRecords = true;
+      } catch (error) {
+        console.error(error);
+        errorMessage = error instanceof Error ? error.message : "An error occurred while fetching matched records";
+        showError = true;
+      }
+      isLoading = false;
+    }
+  }
 
+  // Add function to go back to main view
+  function handleBackToMain() {
+    showingMatchedRecords = false;
+    selectedRecordMatches = [];
+    selectedRecord = null;
+  }
+
+  // Add a watch effect for page changes
+  $: if ($pageIndex !== undefined) {
+    fetchRecords(dateRange?.start, dateRange?.end);
+  }
 </script>
-<div class="font-sans overflow-x-auto">
-    <div class="rounded-md border">
-      {#if isLoading}
-      <div class="flex items-center justify-center h-full">
-      <div >
-      <svg xmlns="http://www.w3.org/2000/svg" class="spinner-3 w-20 h-30 shrink-0 animate-spin" viewBox="0 0 682.667 682.667">
-        <defs>
-          <clipPath id="a" clipPathUnits="userSpaceOnUse">
-            <path d="M0 512h512V0H0Z" data-original="#000000" />
-          </clipPath>
-        </defs>
-        <g clip-path="url(#a)" transform="matrix(1.33333 0 0 -1.33333 0 682.667)">
-          <path fill="#00e4ff" d="M256 440.598c-8.567 0-15.513 6.945-15.513 15.513v32.877c0 8.567 6.946 15.512 15.513 15.512s15.513-6.945 15.513-15.512v-32.877c0-8.568-6.946-15.513-15.513-15.513" data-original="#00e4ff" />
-          <path fill="#5c27d2" d="M256 7.5c-8.567 0-15.513 6.945-15.513 15.513V55.89c0 8.567 6.946 15.512 15.513 15.512s15.513-6.945 15.513-15.512V23.013c0-8.568-6.946-15.513-15.513-15.513" data-original="#5c27d2" />
-          <path fill="#44f3ff" d="M163.701 415.866c-7.42-4.284-16.907-1.741-21.191 5.678l-16.438 28.472c-4.284 7.42-1.742 16.908 5.678 21.191 7.42 4.284 16.907 1.742 21.191-5.678l16.438-28.472c4.284-7.42 1.742-16.907-5.678-21.191" data-original="#44f3ff" />
-          <path fill="#006aff" d="M380.25 40.793c-7.42-4.284-16.907-1.742-21.191 5.678l-16.438 28.471c-4.284 7.42-1.742 16.908 5.678 21.192 7.42 4.284 16.907 1.741 21.191-5.678l16.438-28.473c4.284-7.419 1.742-16.907-5.678-21.19" data-original="#006aff" />
-          <path fill="#83fcff" d="M96.134 348.299c-4.284-7.42-13.771-9.962-21.191-5.678L46.471 359.06c-7.42 4.283-9.962 13.77-5.678 21.19 4.284 7.42 13.771 9.962 21.191 5.678l28.472-16.438c7.42-4.284 9.962-13.771 5.678-21.191" data-original="#83fcff" />
-          <path fill="#09f" d="M471.207 131.75c-4.284-7.42-13.771-9.962-21.191-5.678l-28.472 16.438c-7.42 4.284-9.962 13.771-5.678 21.191 4.283 7.42 13.771 9.962 21.191 5.678l28.472-16.439c7.419-4.283 9.962-13.77 5.678-21.19" data-original="#0099ff" />
-          <path fill="#b9ffff" d="M71.402 256c0-8.567-6.945-15.513-15.513-15.513H23.012C14.445 240.487 7.5 247.433 7.5 256s6.945 15.513 15.512 15.513h32.877c8.568 0 15.513-6.946 15.513-15.513" data-original="#b9ffff" />
-          <path fill="#00b8ff" d="M504.5 256c0-8.567-6.945-15.513-15.513-15.513H456.11c-8.567 0-15.512 6.946-15.512 15.513s6.945 15.513 15.512 15.513h32.877c8.568 0 15.513-6.946 15.513-15.513" data-original="#00b8ff" />
-          <path fill="#ab8bff" d="M96.134 163.701c4.284-7.42 1.742-16.907-5.678-21.19l-28.472-16.439c-7.42-4.284-16.908-1.742-21.191 5.678-4.284 7.42-1.742 16.907 5.678 21.191l28.472 16.438c7.42 4.284 16.907 1.742 21.191-5.678" data-original="#ab8bff" />
-          <path fill="#00cfff" d="M471.207 380.25c4.284-7.42 1.741-16.907-5.678-21.191l-28.472-16.438c-7.42-4.284-16.908-1.742-21.191 5.678-4.284 7.42-1.742 16.907 5.678 21.19l28.472 16.439c7.42 4.284 16.907 1.742 21.191-5.678" data-original="#00cfff" />
-          <path fill="#7a3dff" d="M163.701 96.134c7.419-4.284 9.962-13.771 5.678-21.191l-16.438-28.472c-4.284-7.42-13.772-9.962-21.191-5.678-7.42 4.283-9.962 13.772-5.678 21.191l16.438 28.472c4.284 7.419 13.771 9.962 21.191 5.678" data-original="#7a3dff" />
-          <path fill="#00cfff" d="M380.25 471.207c7.42-4.283 9.962-13.771 5.678-21.19l-16.438-28.473c-4.284-7.419-13.771-9.962-21.191-5.678-7.42 4.284-9.962 13.772-5.678 21.192l16.438 28.471c4.284 7.42 13.772 9.962 21.191 5.678" data-original="#00cfff" />
-          <path fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round" stroke-miterlimit="10" stroke-width="15" d="M256 440.598h0c-8.567 0-15.513 6.945-15.513 15.513v32.877c0 8.567 6.946 15.512 15.513 15.512s15.513-6.945 15.513-15.512v-32.877c0-8.568-6.946-15.513-15.513-15.513ZM256 7.5h0c-8.567 0-15.513 6.945-15.513 15.513V55.89c0 8.567 6.946 15.512 15.513 15.512s15.513-6.945 15.513-15.512V23.013c0-8.568-6.946-15.513-15.513-15.513ZM163.701 415.866h0c-7.42-4.284-16.907-1.741-21.191 5.678l-16.438 28.472c-4.284 7.42-1.742 16.908 5.678 21.191 7.42 4.284 16.907 1.742 21.191-5.678l16.438-28.472c4.284-7.42 1.742-16.907-5.678-21.191ZM380.25 40.793h0c-7.42-4.284-16.907-1.742-21.191 5.678l-16.438 28.471c-4.284 7.42-1.742 16.908 5.678 21.192 7.42 4.284 16.907 1.741 21.191-5.678l16.438-28.473c4.284-7.419 1.742-16.907-5.678-21.19ZM96.134 348.299h0c-4.284-7.42-13.771-9.962-21.191-5.678L46.471 359.06c-7.42 4.283-9.962 13.77-5.678 21.19 4.284 7.42 13.771 9.962 21.191 5.678l28.472-16.438c7.42-4.284 9.962-13.771 5.678-21.191ZM471.207 131.75h0c-4.284-7.42-13.771-9.962-21.191-5.678l-28.472 16.438c-7.42 4.284-9.962 13.771-5.678 21.191 4.283 7.42 13.771 9.962 21.191 5.678l28.472-16.439c7.419-4.283 9.962-13.77 5.678-21.19ZM71.402 256h0c0-8.567-6.945-15.513-15.513-15.513H23.012C14.445 240.487 7.5 247.433 7.5 256s6.945 15.513 15.512 15.513h32.877c8.568 0 15.513-6.946 15.513-15.513ZM504.5 256h0c0-8.567-6.945-15.513-15.513-15.513H456.11c-8.567 0-15.512 6.946-15.512 15.513s6.945 15.513 15.512 15.513h32.877c8.568 0 15.513-6.946 15.513-15.513ZM96.134 163.701h0c4.284-7.42 1.742-16.907-5.678-21.19l-28.472-16.439c-7.42-4.284-16.908-1.742-21.191 5.678-4.284 7.42-1.742 16.907 5.678 21.191l28.472 16.438c7.42 4.284 16.907 1.742 21.191-5.678ZM471.207 380.25h0c4.284-7.42 1.741-16.907-5.678-21.191l-28.472-16.438c-7.42-4.284-16.908-1.742-21.191 5.678-4.284 7.42-1.742 16.907 5.678 21.19l28.472 16.439c7.42 4.284 16.907 1.742 21.191-5.678ZM163.701 96.134h0c7.419-4.284 9.962-13.771 5.678-21.191l-16.438-28.472c-4.284-7.42-13.772-9.962-21.191-5.678-7.42 4.283-9.962 13.772-5.678 21.191l16.438 28.472c4.284 7.419 13.771 9.962 21.191 5.678ZM380.25 471.207h0c7.42-4.283 9.962-13.771 5.678-21.19l-16.438-28.473c-4.284-7.419-13.771-9.962-21.191-5.678-7.42 4.284-9.962 13.772-5.678 21.192l16.438 28.471c4.284 7.42 13.772 9.962 21.191 5.678Z" data-original="#000000" />
-          <path fill="#00e4ff" d="M334.05 256c0-43.11-34.94-78.05-78.05-78.05-14.72 0-28.49 4.07-40.24 11.16-22.66 13.65-37.81 38.5-37.81 66.89 0 43.11 34.94 78.05 78.05 78.05 21.9 0 41.69-9.01 55.86-23.54 13.73-14.06 22.19-33.29 22.19-54.51" data-original="#00e4ff" />
-          <path fill="#00cfff" d="M334.05 256c0-43.11-34.94-78.05-78.05-78.05-14.72 0-28.49 4.07-40.24 11.16 89.7 22.11 99.94 82.079 96.1 121.4 13.73-14.06 22.19-33.29 22.19-54.51" data-original="#00cfff" />
-          <path fill="#e8e6ed" d="M334.05 256H256v78.05c21.9 0 41.69-9.01 55.86-23.54v-.01c13.74-14.061 22.19-33.29 22.19-54.5" data-original="#e8e6ed" />
-          <path fill="#d1d0d8" d="M305.07 256c7.58 18.96 8.36 38.45 6.79 54.5 13.74-14.061 22.19-33.29 22.19-54.5Z" data-original="#d1d0d8" />
-          <path fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round" stroke-miterlimit="10" stroke-width="15" d="M334.06 256c0-43.111-34.949-78.061-78.061-78.061-43.111 0-78.06 34.95-78.06 78.061 0 43.111 34.949 78.061 78.06 78.061 43.112 0 78.061-34.95 78.061-78.061Z" data-original="#000000" />
-          <path fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round" stroke-miterlimit="10" stroke-width="15" d="M256 334.06v-78.061h78.061" data-original="#000000" />
-        </g>
-      </svg>
-      <p class="text-center">Loading...</p> <!-- Added Loading text -->
 
+<div class="w-full max-w-full">
+  {#if showError}
+    <div class="flex justify-center">
+      <Fail message={errorMessage} onClose={() => (showError = false)} />
     </div>
+  {/if}
 
-
+  {#if isLoading}
+    <div class="flex items-center justify-center h-screen">
+      <div>
+        <Loading />
+        <p class="text-center">Loading...</p>
+      </div>
     </div>
-      {:else}
-        <Table.Root {...$tableAttrs}>
-          <Table.Header>
-            {#each $headerRows as headerRow}
-              <Subscribe rowAttrs={headerRow.attrs()}>
-                <Table.Row>
-                  {#each headerRow.cells as cell (cell.id)}
-                    <Subscribe attrs={cell.attrs()} let:attrs props={cell.props()}>
-                      <Table.Head {...attrs}>
-                        <Render of={cell.render()} />
-                      </Table.Head>
-                    </Subscribe>
-                  {/each}
+  {:else}
+    {#if showingMatchedRecords}
+      <!-- Matched Records View -->
+      <div class="w-full p-4">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-xl font-semibold">
+            Matched Records for Patient: {selectedRecord && barcodeToRecordMap.get(selectedRecord)?.patientNameSurname}
+          </h2>
+          <Button variant="outline" on:click={handleBackToMain}>
+            Back
+          </Button>
+        </div>
+        
+        <div class="w-full overflow-x-auto rounded-md">
+          <Table.Root class="border-collapse table-auto p-4">
+            <Table.Header class="bg-gray-50">
+              <Table.Row>
+                <Table.Head class="px-4 py-3 text-xs font-medium text-gray-900">Barcode ID</Table.Head>
+                <Table.Head class="px-4 py-3 text-xs font-medium text-gray-900">Patient Name Surname</Table.Head>
+                <Table.Head class="px-4 py-3 text-xs font-medium text-gray-900">Barcode Date</Table.Head>
+                <Table.Head class="px-4 py-3 text-xs font-medium text-gray-900">Organism Name</Table.Head>
+                <Table.Head class="px-4 py-3 text-xs font-medium text-gray-900">Department</Table.Head>
+                <Table.Head class="px-4 py-3 text-xs font-medium text-gray-900">Resistant Antibiotics</Table.Head>
+                <Table.Head class="px-4 py-3 text-xs font-medium text-gray-900">Susceptible Antibiotics</Table.Head>
+                <Table.Head class="px-4 py-3 text-xs font-medium text-gray-900">Susceptible at High Dose Antibiotics</Table.Head>
+              </Table.Row>
+            </Table.Header>
+            <Table.Body>
+              {#each selectedRecordMatches as match}
+                <Table.Row class="hover:bg-gray-50">
+                  <Table.Cell class="px-4 py-3 text-xs text-gray-500">{match.barcodeId}</Table.Cell>
+                  <Table.Cell class="px-4 py-3 text-xs text-gray-500">{match.patientNameSurname}</Table.Cell>
+                  <Table.Cell class="px-4 py-3 text-xs text-gray-500">{formatDate(match.barcodeDate)}</Table.Cell>
+                  <Table.Cell class="px-4 py-3 text-xs text-gray-500">{match.organismName}</Table.Cell>
+                  <Table.Cell class="px-4 py-3 text-xs text-gray-500">{match.department}</Table.Cell>
+                  <Table.Cell class="px-4 py-3 text-xs text-gray-500">{match.resistantAntibiotics.join(", ")}</Table.Cell>
+                  <Table.Cell class="px-4 py-3 text-xs text-gray-500">{match.susceptibleAntibiotics.join(", ")}</Table.Cell>
+                  <Table.Cell class="px-4 py-3 text-xs text-gray-500">{match.susceptibleAtHighDoseAntibiotics.join(", ")}</Table.Cell>
                 </Table.Row>
-              </Subscribe>
-            {/each}
-          </Table.Header>
-          <Table.Body {...$tableBodyAttrs}>
-            {#each $pageRows as row (row.id)}
-              <Subscribe rowAttrs={row.attrs()} let:rowAttrs>
-                <Table.Row {...rowAttrs}>
-                  {#each row.cells as cell (cell.id)}
-                    <Subscribe attrs={cell.attrs()} let:attrs>
-                      <Table.Cell {...attrs}>
-                        <Render of={cell.render()} />
-                      </Table.Cell>
-                    </Subscribe>
-                  {/each}
-                </Table.Row>
-              </Subscribe>
-            {/each}
-          </Table.Body>
-        </Table.Root>
-      {/if}
-    </div>
-  </div>
+              {/each}
+            </Table.Body>
+          </Table.Root>
+        </div>
+      </div>
+    {:else}
+      <!-- Main Table View -->
+      <div class="w-full p-2 pb-2 flex justify-between items-end">
+        <div class="flex justify-between gap-2 items-end">
+          <div>
+            <Datepicker bind:range={dateRange} />
+          </div>
+          <Button
+            disabled={dateRange == null ||
+              dateRange.start == null ||
+              dateRange.end == null}
+            variant="default"
+            on:click={handleDateSearch}
+          >
+            Search
+          </Button>
+        </div>
+
+        <div class="flex gap-2 items-center">
+          <Input
+            type="text"
+            placeholder="Search by patient name"
+            class="w-64"
+            bind:value={patientSearch}
+            on:keydown={(e) => e.key === "Enter" && handlePatientSearch()}
+          />
+          <Button
+            variant="default"
+            disabled={patientSearch.trim() === ""}
+            on:click={handlePatientSearch}
+          >
+            Search Patient
+          </Button>
+        </div>
+      </div>
+      <div class="w-full overflow-x-auto rounded-md">
+        <div class="pl-2">
+          <Table.Root {...$tableAttrs} class="border-collapse table-auto p-4">
+            <Table.Header class="bg-gray-50">
+              {#each $headerRows as headerRow}
+                <Subscribe rowAttrs={headerRow.attrs()}>
+                  <Table.Row>
+                    {#each headerRow.cells as cell (cell.id)}
+                      <Subscribe
+                        attrs={cell.attrs()}
+                        let:attrs
+                        props={cell.props()}
+                        let:props
+                      >
+                        <Table.Head
+                          {...attrs}
+                          class="px-4 py-3 text-xs text-bold	text-center font-medium text-gray-900"
+                        >
+                         
+                            <Render of={cell.render()} />
+                        </Table.Head>
+                      </Subscribe>
+                    {/each}
+                  </Table.Row>
+                </Subscribe>
+              {/each}
+            </Table.Header>
+            <Table.Body {...$tableBodyAttrs}>
+              {#each $pageRows as row (row.id)}
+                <Subscribe rowAttrs={row.attrs()} let:rowAttrs>
+                  {#if row.isData() && hasMatches(row.dataId)}
+                    <Table.Row
+                      {...rowAttrs}
+                      class="bg-green-100 hover:bg-green-200 cursor-pointer"
+                      on:click={() => handleRowClick(row.dataId)}
+                    >
+                      {#each row.cells as cell (cell.id)}
+                        <Subscribe attrs={cell.attrs()} let:attrs>
+                          <Table.Cell
+                            {...attrs}
+                            class="px-4 py-3 text-xs text-gray-500"
+                          >
+                            <Render of={cell.render()} />
+                          </Table.Cell>
+                        </Subscribe>
+                      {/each}
+                    </Table.Row>
+                  {:else}
+                    <Table.Row {...rowAttrs} class="hover:bg-gray-50">
+                      {#each row.cells as cell (cell.id)}
+                        <Subscribe attrs={cell.attrs()} let:attrs>
+                          <Table.Cell
+                            {...attrs}
+                            class="px-4 py-3 text-xs text-gray-500"
+                          >
+                            <Render of={cell.render()} />
+                          </Table.Cell>
+                        </Subscribe>
+                      {/each}
+                    </Table.Row>
+                  {/if}
+                </Subscribe>
+              {/each}
+            </Table.Body>
+          </Table.Root>
+        </div>
+        <div class="flex items-center justify-between space-x-4 py-4 px-4">
+          <div class="text-sm text-gray-500">
+            Showing {$pageIndex * recordsPerPage + 1} to {Math.min(($pageIndex + 1) * recordsPerPage, $totalRecords)} of {$totalRecords} records
+          </div>
+          <div class="flex space-x-4">
+            <Button
+              variant="outline"
+              size="sm"
+              on:click={() => ($pageIndex = $pageIndex - 1)}
+              disabled={!$hasPreviousPage}>Previous</Button
+            >
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!$hasNextPage}
+              on:click={() => ($pageIndex = $pageIndex + 1)}>Next</Button
+            >
+          </div>
+        </div>
+      </div>
+    {/if}
+  {/if}
+</div>
+
+<style>
+  /* Remove the style block as we're using Tailwind classes */
+</style>

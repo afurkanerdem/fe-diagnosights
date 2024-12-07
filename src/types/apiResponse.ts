@@ -9,4 +9,4 @@ export type LabRecordMatchInfoPair = {
 };
 
 // Define the API response type
-export type ApiResponse = LabRecordMatchInfoPair[];
+export type ApiResponse = {records: LabRecordMatchInfoPair[], totalCount: number};
