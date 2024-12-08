@@ -48,7 +48,7 @@
   let recordsPerPage = 15;
 
    async function fetchMatchedRecords(barcodeId: String){
-    let matches = recordToMatchInfoMap.get(barcodeId);
+    let matches = recordToMatchInfoMap.get(barcodeId)?.filter(it => it !== barcodeId );
     let url = "/api/batchRecords"
     if (matches) {
       const response = await fetch(url, {
